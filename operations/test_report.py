@@ -138,5 +138,136 @@ class ReportTests(unittest.TestCase):
         self.assertIn("RPT-REFERENCE-001", self.errors())
 
 
+class AcceptanceTests(unittest.TestCase):
+    def setUp(self):
+        self.payload = c.load(c.ROOT / "models/acceptance.schema.json")["examples"][0]
+
+    def errors(self):
+        return c.validate(self.payload, today=date(2026, 9, 14))
+
+    def proved(self, status="PASS"):
+        import hashlib
+        import json
+        answer = self.payload["answers"][0]
+        answer["status"] = status
+        answer["observation"]["execution"] = "PERFORMED"
+        subject = self.payload["subjects"][0]
+        digest = hashlib.sha256(json.dumps(subject, sort_keys=True, separators=(",", ":"),
+                                          ensure_ascii=True).encode()).hexdigest()
+        self.payload["evidence"] = [{
+            "id": "proof", "subject_id": "candidate", "subject_sha256": digest,
+            "reference": "artifact:sha256:" + "a" * 64, "sha256": "a" * 64,
+            "producer": "synthetic fixture, not a real verifier",
+            "verification": {"method": "synthetic declared comparison", "result": "MATCH"}}]
+        answer["evidence_ids"] = ["proof"]
+        self.payload["stages"][0]["eligibility"] = "ELIGIBLE" if status == "PASS" else "BLOCKED"
+
+    def test_unknown_is_valid_but_blocked(self):
+        self.assertEqual([], self.errors())
+
+    def test_status_is_not_execution_state(self):
+        for status in ("SKIP", "NOT_RUN", "PASSED"):
+            self.payload["answers"][0]["status"] = status
+            self.assertTrue(self.errors())
+
+    def test_pass_requires_performed_observation_and_evidence(self):
+        self.payload["answers"][0]["status"] = "PASS"
+        self.payload["stages"][0]["eligibility"] = "ELIGIBLE"
+        self.assertTrue(self.errors())
+        self.proved()
+        self.assertEqual([], self.errors())
+        self.payload["answers"][0]["observation"]["execution"] = "NOT_RUN"
+        self.assertTrue(self.errors())
+
+    def test_fail_is_valid_but_blocked(self):
+        self.proved("FAIL")
+        self.assertEqual([], self.errors())
+        self.payload["stages"][0]["eligibility"] = "ELIGIBLE"
+        self.assertTrue(self.errors())
+
+    def test_na_requires_activation_condition(self):
+        answer = self.payload["answers"][0]
+        answer["status"] = "N/A"
+        self.payload["stages"][0]["eligibility"] = "ELIGIBLE"
+        self.assertTrue(self.errors())
+        answer["applicability"] = {"state": "NOT_APPLICABLE", "reason": "No peer in local chat scope.",
+                                   "activation_condition": "A peer enters the accepted scope."}
+        self.assertEqual([], self.errors())
+
+    def test_timeout_can_be_unknown_after_execution(self):
+        answer = self.payload["answers"][0]
+        answer["observation"].update(execution="PERFORMED", result="Timeout after dispatch; outcome unknown.")
+        self.assertEqual([], self.errors())
+        answer["limits"]["missing_data"] = []
+        self.assertTrue(self.errors())
+
+    def test_subject_scope_change_invalidates_evidence(self):
+        self.proved()
+        self.payload["subjects"][0]["scope"]["scenario"] = "Different scenario"
+        self.assertTrue(self.errors())
+
+    def test_missing_or_unverified_evidence_is_rejected(self):
+        self.proved()
+        self.payload["evidence"][0]["verification"]["result"] = "NOT_CHECKED"
+        self.assertTrue(self.errors())
+        self.payload["evidence"] = []
+        self.assertTrue(self.errors())
+
+    def test_content_address_must_match(self):
+        self.proved()
+        self.payload["evidence"][0]["sha256"] = "b" * 64
+        self.assertTrue(self.errors())
+
+    def test_stale_answer_cannot_promote(self):
+        self.proved()
+        self.payload["created"] = "2026-09-12"
+        self.payload["answers"][0]["observation"]["at"] = "2026-09-12T00:00:00Z"
+        self.payload["answers"][0]["limits"]["valid_through"] = "2026-09-13"
+        self.assertTrue(self.errors())
+        self.payload["stages"][0]["eligibility"] = "BLOCKED"
+        self.assertEqual([], self.errors())
+
+    def test_only_dependent_stages_are_blocked(self):
+        self.proved()
+        unknown = copy.deepcopy(self.payload["answers"][0])
+        unknown.update(questionId="V-02", status="UNKNOWN", evidence_ids=[])
+        self.payload["answers"].append(unknown)
+        self.payload["stages"] = [
+            {"id": "chat", "phase": "execution", "requires": ["V-01"], "depends_on": [], "eligibility": "ELIGIBLE"},
+            {"id": "ci", "phase": "pr", "requires": ["V-02"], "depends_on": [], "eligibility": "BLOCKED"},
+            {"id": "merge", "phase": "merge", "requires": ["V-01"], "depends_on": ["ci"], "eligibility": "BLOCKED"}]
+        self.assertEqual([], self.errors())
+        self.payload["stages"][2]["eligibility"] = "ELIGIBLE"
+        self.assertTrue(self.errors())
+
+    def test_cycles_and_missing_references(self):
+        stage = self.payload["stages"][0]
+        stage["depends_on"] = [stage["id"]]
+        self.assertTrue(self.errors())
+        stage["depends_on"] = ["missing-stage"]
+        self.assertTrue(self.errors())
+        stage["depends_on"] = []
+        stage["requires"] = ["V-99"]
+        self.assertTrue(self.errors())
+
+    def test_authority_and_unknown_fields_are_rejected(self):
+        self.payload["authority"] = "merge"
+        self.assertTrue(self.errors())
+        self.payload["authority"] = "none"
+        self.payload["approve"] = True
+        self.assertTrue(self.errors())
+
+    def test_observation_requires_utc(self):
+        self.payload["answers"][0]["observation"]["at"] = "2026-09-14T00:00:00+02:00"
+        self.assertTrue(self.errors())
+
+    def test_duplicate_answers_and_empty_gate_are_rejected(self):
+        self.payload["answers"].append(copy.deepcopy(self.payload["answers"][0]))
+        self.assertTrue(self.errors())
+        self.payload["answers"].pop()
+        self.payload["stages"][0]["requires"] = []
+        self.assertTrue(self.errors())
+
+
 if __name__ == "__main__":
     unittest.main()

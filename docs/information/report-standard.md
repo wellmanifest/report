@@ -3,7 +3,7 @@
   "schema": "wellmanifest.docs/document/v1",
   "id": "report-standard",
   "kind": "information",
-  "version": 2,
+  "version": 3,
   "title": "Report manifests and evidence boundaries",
   "status": "proposed",
   "owner": "wellmanifest/report",
@@ -21,6 +21,65 @@
 ---
 
 # Report manifests and evidence boundaries
+
+<!-- docs:section acceptance_contract -->
+## Separate acceptance answer contract
+
+[Acceptance schema](../../models/acceptance.schema.json) defines
+`wellmanifest.report/acceptance/v1` separately from the unchanged manifest.
+Its `report_id` is correlation, not a resolvable URI or authorization. Store this
+bounded payload as an evidence artifact associated with a canonical Docs report;
+the payload alone does not satisfy report placement or publication. The embedded
+example is synthetic UNKNOWN, not evidence of a deployment.
+
+Answers bind stable question IDs, PASS/FAIL/UNKNOWN/N/A, claims, exact subjects
+and scopes, UTC observations, environment, architecture, execution state,
+evidence references, producer and declared verification method, validity,
+limitations and owned next actions. NOT_RUN is an execution state, not UNKNOWN;
+UNKNOWN also covers uncertain outcomes after a performed request times out.
+N/A requires a scope reason and activation condition, not a skipped test.
+Conformance allocates no tickets and executes no retries or external actions.
+
+Evidence binds SHA-256 of the whole subject, including scope and versioned
+config/policy/schema/model/dependency bindings. Digest bytes use
+`json.dumps(subject, sort_keys=True, separators=(",", ":"), ensure_ascii=True)`
+encoded as UTF-8. PASS/FAIL require performed observation, evidence and an
+identified source or artifact. The checker validates declared relationships;
+it does not retrieve artifacts, compare actual bytes, verify signatures or
+trust the producer. MATCH remains a claim requiring independent verification.
+Consumers independently resolve their risk-specific required bindings and
+question sets; a report cannot select or weaken its own protected gates.
+
+Stage dependencies form an explicit DAG. ELIGIBLE requires fresh PASS or
+justified N/A for each required question and eligible dependencies. FAIL,
+UNKNOWN and staleness block that stage and its dependents, not independent work.
+ELIGIBLE is advisory, never approval to execute, merge, release or deploy.
+A conformance PASS may correctly describe BLOCKED stages. Consumers must compare
+the graph and applicability against their independently protected policy.
+
+Validity is date-granular: valid_through is inclusive through the UTC date,
+bounded by review_after; --as-of selects the assessment date. Shorter-lived
+operational permissions remain the controller's responsibility. Subject, scope,
+config, policy, model, data or measurement-condition changes require renewed
+observation even within that date. The checker cannot observe external changes
+or decide applicability from a claim alone. Never cache ELIGIBLE as authority.
+
+Taskand owns plans/intents/twins; Koru owns queue execution; Goal owns controlled
+delivery and workspace audit; Validator owns independent exact-head review and
+protected merge. These are integration boundaries, not claims that these products
+or a complete deliver pipeline were tested here. Report owns only bounded evidence
+contracts. Merge, release and deployment remain distinct phases.
+
+```sh
+python3 -B operations/conformance.py /path/to/acceptance.json --as-of 2026-09-14
+python3 -B -m unittest discover -s operations -p test_report.py
+```
+
+Local acceptance validation on 2026-09-14 passed all 34 tests (19 original and
+15 acceptance regressions), the manifest example, pinned Docs and managed
+governance. These are local observations, not protected exact-head CI, merge,
+release, consumer adoption or deployment evidence. Protected publication is
+authorized but awaits remote access/creation and an independently deployed profile.
 
 <!-- docs:section purpose -->
 ## Purpose

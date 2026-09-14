@@ -65,7 +65,121 @@ def safe_path(value):
             and ":" not in value and not any(p in {"", ".", ".."} for p in parts))
 
 
+def validate_acceptance(manifest, *, today=None):
+    """Check scoped acceptance claims, not external evidence or authority."""
+    from datetime import datetime
+
+    schema = load(ROOT / "models/acceptance.schema.json")
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema, format_checker=FormatChecker())
+    if next(validator.iter_errors(manifest), None) is not None:
+        return [{"code": "RPT-ACCEPTANCE-SCHEMA-001", "message": "Invalid acceptance payload."}]
+    today = today or date.today()
+    errors = []
+
+    def reject(code, message):
+        errors.append({"code": "RPT-ACCEPTANCE-" + code, "message": message})
+
+    def indexed(items, key):
+        result = {}
+        for item in items:
+            if item[key] in result:
+                reject("REFERENCE-001", "Duplicate acceptance identifier.")
+            result[item[key]] = item
+        return result
+
+    subjects = indexed(manifest["subjects"], "id")
+    evidence = indexed(manifest["evidence"], "id")
+    answers = indexed(manifest["answers"], "questionId")
+    stages = indexed(manifest["stages"], "id")
+    created, updated, review = (date.fromisoformat(manifest[key])
+                                for key in ("created", "updated", "review_after"))
+    if not created <= updated <= review or updated > today:
+        reject("DATE-001", "Invalid date ordering or future update.")
+    subject_hashes = {
+        key: hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                      ensure_ascii=True).encode("utf-8")).hexdigest()
+        for key, value in subjects.items()
+    }
+    for item in evidence.values():
+        target = subjects.get(item["subject_id"])
+        if target is None or item["subject_sha256"] != subject_hashes.get(item["subject_id"]):
+            reject("SUBJECT-001", "Evidence does not bind the exact subject and scope.")
+        reference = item["reference"]
+        if reference.startswith(("artifact:sha256:", "receipt:sha256:")):
+            if reference.rsplit(":", 1)[-1] != item["sha256"]:
+                reject("EVIDENCE-001", "Content-addressed evidence digest mismatch.")
+        elif target is not None:
+            prefix = ("repo://" + target["scope"]["repository"] + "@"
+                      + str(target["source_revision"]) + "/")
+            if not reference.startswith(prefix) or not safe_path(reference[len(prefix):]):
+                reject("EVIDENCE-001", "Source evidence requires the exact revision and safe path.")
+    acceptable = {}
+    for key, item in answers.items():
+        target = subjects.get(item["subject_id"])
+        if target is None:
+            reject("REFERENCE-001", "Answer has an unknown subject.")
+        links = [evidence.get(value) for value in item["evidence_ids"]]
+        if any(value is None or value["subject_id"] != item["subject_id"] for value in links):
+            reject("REFERENCE-001", "Answer evidence is missing or belongs to another subject.")
+        observed = datetime.fromisoformat(item["observation"]["at"].replace("Z", "+00:00")).date()
+        valid = date.fromisoformat(item["limits"]["valid_through"])
+        if observed > updated or valid < observed or valid > review:
+            reject("DATE-001", "Observation or validity lies outside the declared interval.")
+        status = item["status"]
+        applicability = item["applicability"]
+        if status == "N/A":
+            if applicability["state"] != "NOT_APPLICABLE" or not applicability["activation_condition"]:
+                reject("APPLICABILITY-001", "N/A requires a reason and activation condition.")
+        elif applicability["state"] != "APPLICABLE":
+            reject("APPLICABILITY-001", "An applicable answer cannot declare N/A scope.")
+        if status in {"PASS", "FAIL"}:
+            if item["observation"]["execution"] != "PERFORMED" or not links:
+                reject("EVIDENCE-001", "PASS/FAIL require a performed observation and evidence.")
+            if any(value is not None and value["verification"]["result"] != "MATCH" for value in links):
+                reject("EVIDENCE-001", "PASS/FAIL require declared matching evidence verification.")
+            if target is not None and target["source_revision"] is None and target["artifact_sha256"] is None:
+                reject("SUBJECT-001", "PASS/FAIL require an identified source or artifact.")
+        if status == "UNKNOWN" and not item["limits"]["missing_data"]:
+            reject("UNKNOWN-001", "UNKNOWN must identify the missing knowledge.")
+        if status in {"FAIL", "UNKNOWN"} and not (item["nextAction"]["ticket_ref"] or item["nextAction"]["proposal"]):
+            reject("ACTION-001", "FAIL/UNKNOWN require an owned ticket or bounded proposal.")
+        acceptable[key] = status in {"PASS", "N/A"} and valid >= today and review >= today
+
+    visiting, resolved = set(), {}
+
+    def eligible(key):
+        if key in resolved:
+            return resolved[key]
+        if key not in stages:
+            reject("REFERENCE-001", "Unknown stage dependency.")
+            return False
+        if key in visiting:
+            reject("DAG-001", "Acceptance dependencies contain a cycle.")
+            return False
+        visiting.add(key)
+        stage = stages[key]
+        own = []
+        for question in stage["requires"]:
+            if question not in answers:
+                reject("REFERENCE-001", "Required acceptance answer is missing.")
+            own.append(acceptable.get(question, False))
+        dependencies = [eligible(other) for other in stage["depends_on"]]
+        result = all(own) and all(dependencies)
+        visiting.remove(key)
+        resolved[key] = result
+        return result
+
+    for key, stage in stages.items():
+        expected = "ELIGIBLE" if eligible(key) else "BLOCKED"
+        if stage["eligibility"] != expected:
+            reject("STAGE-001", "Declared eligibility differs from scoped assessment.")
+    return errors
+
+
 def validate(manifest, *, today=None):
+    if isinstance(manifest, dict) and manifest.get("schema") == "wellmanifest.report/acceptance/v1":
+        return validate_acceptance(manifest, today=today)
     docs, validator = dependencies()
     if next(validator.iter_errors(manifest), None) is not None:
         return [{"code": "RPT-SCHEMA-001", "message": "Invalid closed manifest shape or unsupported version."}]

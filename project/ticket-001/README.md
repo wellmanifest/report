@@ -3,7 +3,7 @@
 - **ID**: ticket-001
 - **Owner**: agent:codex-report
 - **Status**: IN_PROGRESS
-- **Workflow state**: VALIDATION
+- **Workflow state**: PUBLICATION
 - **Created**: 2026-09-14
 
 ## Goal and scope
@@ -27,6 +27,19 @@ candidate files are preserved in the private, secret-scanned snapshot.
 
 ## Acceptance criteria
 
+- [x] AC-04: Scoped acceptance answers bind evidence and freshness; dependencies
+  block only their dependent stages and unknown outcomes never authorize retry.
+
+SESSION_EXECUTION_AUTHORIZATION: the user continued after the exact proposal to
+extend only ticket-001 to ten implementation files and three interfaces. Use
+the existing L profile without changing global policy. Preserve the original
+manifest; add a separate acceptance schema, checker routing, regressions and
+documentation. No Taskand/performance edits or remote publication are authorized.
+The earlier nine-file correction is historical, not the current expanded limit.
+The new candidate is pending validation; the earlier PASS does not cover it.
+Writer session: codex-report-acceptance-20260914; lease
+lease-ef97be9f778222529824a48bbb2dd81f, fencing token 225.
+
 - [x] AC-01: A closed versioned manifest composes with pinned Docs placement.
 - [x] AC-02: Missing evidence, partial coverage and publication claims fail safely.
 - [x] AC-03: Conformance regressions and managed governance pass locally.
@@ -47,3 +60,23 @@ authority issuer or trusted publication verifier.
 
 This directory contains the minimal reviewed intent. Optional participant prose
 and raw command logs are not required delivery output.
+
+## Authorized protected publication
+
+SESSION_EXECUTION_AUTHORIZATION: the user explicitly requested push and merge
+on 2026-09-14. This supersedes earlier local-only scope for repository publication
+and permits invoking the independent protected delivery process, never direct
+merge or self-approval. Visibility/creation of the unavailable remote repository
+remains pending explicit user choice. No package release or deployment is implied.
+
+Local extension validation: 34/34 tests PASS (19 original plus 15 acceptance),
+manifest example PASS, pinned Docs PASS with zero findings/warnings, and managed
+governance PASS with zero errors/warnings. These observations precede this
+publication-note edit; exact-head protected CI is still required.
+
+Publication preflight: PUBLICATION_PROFILE_MISSING for wellmanifest/report.
+GitHub repository lookup: HTTP 404 for authenticated account tom-sapletta-com.
+Owner/nextAction: protected Validator/OneDev deployment owner must onboard the
+repository and demonstrate its required coverage; the repository owner must
+resolve remote visibility/access. Neither condition authorizes bypassing checks.
+The ticket remains IN_PROGRESS / PUBLICATION; no merge has been observed.
