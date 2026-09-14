@@ -32,7 +32,8 @@
         "events/**",
         "error/**",
         "models/**",
-        "proto/**"
+        "proto/**",
+        ".governance/docs.json"
       ],
       "workstream": "integration"
     },
@@ -96,7 +97,8 @@
           "events/**",
           "error/**",
           "models/**",
-          "proto/**"
+          "proto/**",
+          ".governance/docs.json"
         ]
       },
       "interfaces": {

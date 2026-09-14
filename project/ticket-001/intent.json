@@ -1,0 +1,64 @@
+{
+  "schema": "new-project.intent/v3",
+  "ticket": "ticket-001",
+  "summary": "Report manifest standard with evidence and publication boundaries",
+  "workstream": "integration",
+  "classification": {
+    "kind": "FEATURE",
+    "priority": "P1",
+    "origin": "requested"
+  },
+  "allowedPaths": [
+    "project/ticket-001/**",
+    "TODO.md",
+    "project/TICKETS.md",
+    ".governance/required-checks.json",
+    ".governance/manifest.json",
+    ".governance/docs.json",
+    "VERSION",
+    "docs/**",
+    "models/**",
+    "operations/**"
+  ],
+  "forbiddenPaths": [
+    "project/ticket-*/user-*.md"
+  ],
+  "stacks": [],
+  "dependsOn": [],
+  "conflictsWith": [],
+  "integrationTicket": null,
+  "placement": {
+    "home": "wellmanifest",
+    "shape": "domain_pack",
+    "adopt": ["wellmanifest/new-project", "wellmanifest/docs", "wellmanifest/worktrees"]
+  },
+  "delivery": {
+    "acceptedBaseSha": "3c24d19bff3707887eb6878652ef0fa03b4b929b",
+    "targetBranch": "main",
+    "outcome": "Local report manifest domain pack with a schema, conformance checker, regression fixtures and canonical documentation.",
+    "nonGoals": ["Remote publication or deployment", "Taskand changes", "Trusted authority issuance", "Moving the earlier cross-repository audit"],
+    "complexity": "M",
+    "estimatedMinutes": 45,
+    "budgets": {"maxImplementationFiles": 9, "maxAffectedComponents": 3, "maxPublicInterfaceChanges": 2, "maxRuntimeDependencies": 1},
+    "architecture": {
+      "status": "accepted",
+      "decision": "Keep report semantics in this domain pack and consume immutable Docs placement policy; conformance never grants authority.",
+      "components": [
+        {"name": "manifest", "paths": ["models/**", "operations/report-policy.json", "operations/dependencies/**"]},
+        {"name": "conformance", "paths": ["operations/*.py", "operations/requirements.txt"]},
+        {"name": "composition", "paths": ["docs/**", "VERSION", ".governance/required-checks.json", ".governance/manifest.json", ".governance/docs.json"]}
+      ],
+      "responsibilityChanges": true,
+      "interfaceChanges": ["wellmanifest.report/manifest/v1", "Read-only conformance CLI"],
+      "dataChanges": ["Report manifests with explicit coverage and untrusted publication claims"],
+      "ui": {"impact": "none", "states": [], "evidence": []},
+      "rollback": "Preserve this isolated unpublished branch and seed. Consumers keep their existing pins; no deployment is changed."
+    },
+    "runtimeDependencies": ["jsonschema==4.26.0"],
+    "validation": [
+      {"criterion": "AC-01", "commands": ["python3 -B operations/conformance.py --example"], "evidence": "Local structural conformance result, not publication proof"},
+      {"criterion": "AC-02", "commands": ["python3 -B -m unittest discover -s operations -p test_report.py"], "evidence": "Positive and negative conformance tests"},
+      {"criterion": "AC-03", "commands": ["./project/governance-check.sh"], "evidence": "Managed local governance report"}
+    ]
+  }
+}
