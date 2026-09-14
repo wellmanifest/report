@@ -1,0 +1,10 @@
+/.worktrees/
+/.subactor/leases/
+/.subactor/sessions/
+/.subactor/recovery/
+/.subactor/receipts/
+/.subactor/cache/
+/.subactor/snapshots/
+.env
+__pycache__/
+.pytest_cache/
