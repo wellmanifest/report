@@ -3,12 +3,12 @@
   "schema": "wellmanifest.docs/document/v1",
   "id": "report-standard",
   "kind": "information",
-  "version": 3,
+  "version": 4,
   "title": "Report manifests and evidence boundaries",
   "status": "proposed",
   "owner": "wellmanifest/report",
   "created": "2026-09-14",
-  "updated": "2026-09-14",
+  "updated": "2026-09-15",
   "review_after": "2026-09-21",
   "source_revision": "3c24d19bff3707887eb6878652ef0fa03b4b929b",
   "affected_repositories": [
@@ -209,3 +209,20 @@ Changes to semantics need versioning and old/new consumer regression vectors.
 A faulty candidate is not adopted; an adopted faulty version is replaced by a
 reviewed immutable version or supported rollback, never by moving a tag or
 rewriting report history. No destructive cleanup is part of this operation.
+
+## Local delivery verification
+
+Run `python operations/conformance.py CANONICAL.report.json --root OWNER_REPO`
+before completing a report. This additive mode requires the actual document,
+sidecar and index in the owning Git checkout, rejects symlinks and untracked
+files, compares document bytes to the declared digest and checks the index link.
+Conformance without `--root` remains a schema/relationship audit only.
+`local_artifacts_verified` is local readback, not remote publication, protected
+approval, content truth, redaction, or evidence authenticity. Invoke Docs with
+its protected pin separately for document metadata and structure.
+
+Repository references accept legitimate dot-prefixed names such as `.github`
+while rejecting bare `.` and `..`. Filesystem path validation remains separate.
+This corrects an actual Maskservice report failure without dropping repositories
+from declared scope. The embedded Docs dependency remains immutable at 0.1.1;
+this change does not silently migrate consumer placement to newer Docs profiles.
