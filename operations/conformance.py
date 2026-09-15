@@ -9,6 +9,8 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import sys
+import subprocess
+import re
 
 from jsonschema import Draft202012Validator, FormatChecker
 
@@ -300,19 +302,74 @@ def validate(manifest, *, today=None):
     return errors
 
 
+def validate_local(manifest, root, manifest_path):
+    """Read back canonical local Git artifacts; never attest remote publication."""
+    root = Path(root).resolve()
+    errors = []
+    def reject(message):
+        errors.append({'code': 'RPT-LOCAL-001', 'message': message})
+    if manifest.get('schema') != 'wellmanifest.report/manifest/v1':
+        return [{'code': 'RPT-LOCAL-001', 'message': 'Local report checks require a report manifest, not acceptance alone.'}]
+    try:
+        top = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], cwd=root, stderr=subprocess.DEVNULL, text=True).strip()
+        remote = subprocess.check_output(['git', 'remote', 'get-url', 'origin'], cwd=root, stderr=subprocess.DEVNULL, text=True).strip()
+        match = re.fullmatch(r'(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?', remote)
+        if Path(top).resolve() != root or not match or match.group(1) != manifest['owner']:
+            reject('Root must be the owning Git repository, not a nested directory or another origin.')
+        files = set(subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0'))
+        document = manifest['document']
+        expected_sidecar = str(PurePosixPath(document['path']).with_suffix('.report.json'))
+        supplied = Path(manifest_path).absolute()
+        if supplied != root / expected_sidecar:
+            reject('Manifest must be the canonical sidecar beside the document.')
+        contents = {}
+        for name in (document['path'], document['index_path'], expected_sidecar):
+            if not safe_path(name):
+                reject('Unsafe local artifact path.'); continue
+            path = root / name
+            current = root
+            for part in PurePosixPath(name).parts:
+                current /= part
+                if current.is_symlink():
+                    reject('Local artifacts must not use symlinks.'); break
+            else:
+                if name not in files or not path.is_file():
+                    reject('Document, sidecar and index must exist and be tracked in Git.'); continue
+                contents[name] = path.read_bytes()
+        sidecar_bytes = contents.get(expected_sidecar)
+        if sidecar_bytes is not None and decode(sidecar_bytes) != manifest:
+            reject('Actual sidecar changed since manifest validation.')
+        raw = contents.get(document['path'])
+        if raw is not None and hashlib.sha256(raw).hexdigest() != document['sha256']:
+            reject('Actual document digest differs from the manifest.')
+        index = contents.get(document['index_path'])
+        if index is not None:
+            link = PurePosixPath(document['path']).relative_to(PurePosixPath(document['index_path']).parent).as_posix()
+            if not re.search(r'\]\(' + re.escape(link) + r'(?:#[^)]*)?\)', index.decode('utf-8')):
+                reject('Canonical document is missing from the tracked index.')
+    except (OSError, subprocess.CalledProcessError, ValueError, KeyError, UnicodeError):
+        reject('Unable to read owning Git repository and canonical report artifacts.')
+    return errors
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", type=Path, nargs="?")
     parser.add_argument("--example", action="store_true",
                         help="Validate the inert example embedded in the schema")
     parser.add_argument("--as-of", type=date.fromisoformat, default=date.today())
+    parser.add_argument("--root", type=Path, help="Verify actual document, sidecar, Git tracking, digest and index in the owning repository")
     args = parser.parse_args()
+    if args.root and args.example:
+        parser.error("--root requires an actual manifest, not --example")
     if args.example == (args.manifest is not None):
         parser.error("Choose a manifest path or --example, but not both")
     try:
         manifest = (load(ROOT / "models/report-manifest.schema.json")["examples"][0]
                     if args.example else load(args.manifest))
         findings = validate(manifest, today=args.as_of)
+        if args.root and not findings:
+            findings.extend(validate_local(manifest, args.root, args.manifest))
         freshness = ("unknown" if findings else "stale" if
                      date.fromisoformat(manifest["review_after"]) < args.as_of else "current")
     except (OSError, ValueError, KeyError, TypeError, RecursionError):
@@ -320,6 +377,7 @@ def main():
         freshness = "unknown"
     print(json.dumps({"conformance": "FAIL" if findings else "PASS",
                       "authority": "none", "publication_verified": False,
+                      "local_artifacts_verified": bool(args.root) and not findings,
                       "evidence_verified": False, "freshness": freshness,
                       "findings": findings}, sort_keys=True))
     return 1 if findings else 0

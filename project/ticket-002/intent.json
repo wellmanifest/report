@@ -1,0 +1,80 @@
+{
+  "schema": "new-project.intent/v3",
+  "ticket": "ticket-002",
+  "summary": "Enforce report completion and verify local deliverables",
+  "workstream": "integration",
+  "classification": {
+    "kind": "BUG",
+    "priority": "P2",
+    "origin": "requested"
+  },
+  "allowedPaths": [
+    "project/ticket-002/**",
+    "TODO.md",
+    "project/TICKETS.md",
+    "models/report-manifest.schema.json",
+    "models/acceptance.schema.json",
+    "operations/conformance.py",
+    "operations/test_report.py",
+    "docs/information/report-standard.md"
+  ],
+  "forbiddenPaths": [
+    "project/ticket-*/user-*.md"
+  ],
+  "stacks": [],
+  "dependsOn": [],
+  "conflictsWith": [],
+  "integrationTicket": null,
+  "delivery": {
+    "acceptedBaseSha": "76182a210ff48ec528d1049e5e32d71d7860d7be",
+    "targetBranch": "main",
+    "outcome": "Enforce explicit completion checks for canonical reports and audit Maskservice adoption.",
+    "nonGoals": [
+      "No global adoption, deployment or protected publication claims."
+    ],
+    "complexity": "M",
+    "estimatedMinutes": 90,
+    "budgets": {
+      "maxImplementationFiles": 7,
+      "maxAffectedComponents": 2,
+      "maxPublicInterfaceChanges": 2,
+      "maxRuntimeDependencies": 0
+    },
+    "architecture": {
+      "status": "accepted",
+      "decision": "Docs owns placement; Report verifies actual local artifacts without claiming remote publication or authority.",
+      "components": [
+        {
+          "name": "report-completion",
+          "paths": [
+            "models/report-manifest.schema.json",
+            "models/acceptance.schema.json",
+            "operations/conformance.py",
+            "operations/test_report.py",
+            "docs/information/report-standard.md"
+          ]
+        }
+      ],
+      "responsibilityChanges": false,
+      "interfaceChanges": [],
+      "dataChanges": [],
+      "ui": {
+        "impact": "none",
+        "states": [],
+        "evidence": []
+      },
+      "rollback": "Revert candidate change before consumer adoption."
+    },
+    "runtimeDependencies": [],
+    "validation": [
+      {
+        "criterion": "AC-01",
+        "commands": [
+          "python -m unittest discover -s operations",
+          "./project/governance-check.sh"
+        ],
+        "evidence": "docs/information/report-standard.md"
+      }
+    ]
+  }
+}

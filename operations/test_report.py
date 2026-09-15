@@ -1,6 +1,11 @@
 """Synthetic conformance vectors; no remote effects or real credentials."""
 
 import copy
+import json
+import tempfile
+import subprocess
+import hashlib
+from pathlib import Path
 from datetime import date
 import unittest
 
@@ -14,6 +19,64 @@ class ReportTests(unittest.TestCase):
     def errors(self, report=None):
         return {x["code"] for x in c.validate(self.report if report is None else report,
                                              today=date(2026, 9, 14))}
+
+    def test_dot_prefixed_repository(self):
+        self.report['scope']['repositories'] = ['maskservice/.github']
+        self.report['scope']['subjects'][0]['repository'] = 'maskservice/.github'
+        self.report['owner'] = 'maskservice/.github'
+        self.assertEqual(self.errors(), set())
+        for name in ['.', '..', '../escape', '']:
+            self.report['owner'] = 'maskservice/' + name
+            self.assertIn('RPT-SCHEMA-001', self.errors())
+
+    def local_fixture(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        def git(*args):
+            return subprocess.check_output(['git', *args], cwd=root, stderr=subprocess.DEVNULL)
+        git('init', '-q')
+        git('remote', 'add', 'origin', 'https://github.com/wellmanifest/report.git')
+        document = root / self.report['document']['path']
+        document.parent.mkdir(parents=True)
+        document.write_text('# Fixture document\n')
+        self.report['document']['sha256'] = hashlib.sha256(document.read_bytes()).hexdigest()
+        index = root / self.report['document']['index_path']
+        index.write_text('[Report](analysis/example-report.md)\n')
+        sidecar = document.with_suffix('.report.json')
+        sidecar.write_text(json.dumps(self.report))
+        git('add', '.')
+        return root, document, index, sidecar, git
+
+    def test_local_readback_and_digest(self):
+        root, doc, index, sidecar, git = self.local_fixture()
+        self.assertEqual(c.validate_local(self.report, root, sidecar), [])
+        doc.write_text('Different bytes')
+        self.assertTrue(c.validate_local(self.report, root, sidecar))
+
+    def test_local_rejects_sidecar_changed_after_load(self):
+        root, doc, index, sidecar, git = self.local_fixture()
+        sidecar.write_text('{}')
+        self.assertTrue(c.validate_local(self.report, root, sidecar))
+
+    def test_local_requires_tracking_and_index_link(self):
+        root, doc, index, sidecar, git = self.local_fixture()
+        git('rm', '--cached', str(doc.relative_to(root)))
+        self.assertTrue(c.validate_local(self.report, root, sidecar))
+        git('add', '.')
+        index.write_text('No link')
+        self.assertTrue(c.validate_local(self.report, root, sidecar))
+
+    def test_local_rejects_wrong_owner_symlink_and_recovery_sidecar(self):
+        root, doc, index, sidecar, git = self.local_fixture()
+        self.assertTrue(c.validate_local(self.report, root, root / 'recovery.report.json'))
+        git('remote', 'set-url', 'origin', 'https://github.com/another/repo.git')
+        self.assertTrue(c.validate_local(self.report, root, sidecar))
+        git('remote', 'set-url', 'origin', 'https://evil.invalid/github.com/wellmanifest/report.git')
+        self.assertTrue(c.validate_local(self.report, root, sidecar))
+        git('remote', 'set-url', 'origin', 'https://github.com/wellmanifest/report.git')
+        source = root / 'private.txt'; doc.rename(source); doc.symlink_to(source)
+        self.assertTrue(c.validate_local(self.report, root, sidecar))
 
     def test_example(self):
         self.assertEqual(self.errors(), set())
