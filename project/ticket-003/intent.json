@@ -1,0 +1,111 @@
+{
+  "schema": "new-project.intent/v3",
+  "ticket": "ticket-003",
+  "summary": "Adopt wellmanifest/new-project standard 0.20.32",
+  "workstream": "governance",
+  "classification": {
+    "kind": "SERVICE",
+    "priority": "P2",
+    "origin": "health"
+  },
+  "allowedPaths": [
+    ".aider.conf.yml",
+    ".cursor/rules/**",
+    ".githooks/**",
+    ".github/copilot-instructions.md",
+    ".github/workflows/new-project-governance.yml",
+    ".gitignore",
+    ".governance/**",
+    ".subactor/**",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "GEMINI.md",
+    "project/TICKETS.md",
+    "project/ticket-002/README.md",
+    "project/ticket-003/**",
+    "project/new-ticket.sh",
+    "project/governance-check.sh",
+    "project/governance-check.bat",
+    "scripts/install-agent-hosts.sh",
+    "scripts/runtime.sh",
+    "wellmanifest_governance.py",
+    "worktree-guard.yaml"
+  ],
+  "forbiddenPaths": [
+    "project/ticket-*/user-*.md"
+  ],
+  "stacks": [],
+  "dependsOn": [],
+  "conflictsWith": [],
+  "integrationTicket": null,
+  "delivery": {
+    "acceptedBaseSha": "3eafc9c212bbfd4060fe15b63eb97e4614725234",
+    "targetBranch": "main",
+    "outcome": "Upgrade to wellmanifest/new-project 0.20.32 with enhanced governance and diagnostics.",
+    "nonGoals": [
+      "No functional changes to report domain models or operations.",
+      "No hand-edited managed files or lock digests"
+    ],
+    "complexity": "L",
+    "estimatedMinutes": 60,
+    "standardAdoption": {
+      "sourceRepository": "wellmanifest/new-project",
+      "fromRevision": "a4178b9cf6fa12540ee7406d7f38391dd4fa1f30",
+      "toRevision": "b6ba9c21a65a6a5648ecf904b64c3b75295e136f"
+    },
+    "budgets": {
+      "maxImplementationFiles": 15,
+      "maxAffectedComponents": 3,
+      "maxPublicInterfaceChanges": 0,
+      "maxRuntimeDependencies": 0
+    },
+    "architecture": {
+      "status": "accepted",
+      "decision": "Adopt standard 0.20.32 governance package and synchronize manifest lock.",
+      "components": [
+        {
+          "name": "managed-governance-package",
+          "paths": [
+            ".governance/**",
+            "AGENTS.md",
+            "CLAUDE.md",
+            "GEMINI.md",
+            ".aider.conf.yml",
+            ".cursor/rules/**",
+            ".githooks/**",
+            ".github/copilot-instructions.md",
+            ".github/workflows/new-project-governance.yml",
+            "project/new-ticket.sh",
+            "project/governance-check.sh",
+            "project/governance-check.bat",
+            "scripts/install-agent-hosts.sh",
+            "scripts/runtime.sh",
+            "wellmanifest_governance.py",
+            "worktree-guard.yaml",
+            ".gitignore",
+            ".subactor/**"
+          ]
+        }
+      ],
+      "responsibilityChanges": false,
+      "interfaceChanges": [],
+      "dataChanges": [],
+      "ui": {
+        "impact": "none",
+        "states": [],
+        "evidence": []
+      },
+      "rollback": "Revert commit to restore previous standard lock."
+    },
+    "runtimeDependencies": [],
+    "validation": [
+      {
+        "criterion": "AC-01",
+        "commands": [
+          "python3 .governance/governance_check.py"
+        ],
+        "evidence": "project/ticket-003/README.md"
+      }
+    ]
+  }
+}

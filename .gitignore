@@ -8,3 +8,5 @@
 .env
 __pycache__/
 .pytest_cache/
+.planfile/
+.github/workflows/planfile-github-sync.yml

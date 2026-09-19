@@ -2,8 +2,8 @@
 
 - **ID**: ticket-002
 - **Owner**: codex
-- **Status**: IN_PROGRESS
-- **Workflow state**: PUBLICATION
+- **Status**: DONE
+- **Workflow state**: DONE
 - **Created**: 2026-09-15
 
 ## Intent
