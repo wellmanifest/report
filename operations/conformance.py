@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date
+from datetime import date, datetime
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
@@ -67,33 +67,16 @@ def safe_path(value):
             and ":" not in value and not any(p in {"", ".", ".."} for p in parts))
 
 
-def validate_acceptance(manifest, *, today=None):
-    """Check scoped acceptance claims, not external evidence or authority."""
-    from datetime import datetime
+def _indexed_acceptance(items, key, reject):
+    result = {}
+    for item in items:
+        if item[key] in result:
+            reject("REFERENCE-001", "Duplicate acceptance identifier.")
+        result[item[key]] = item
+    return result
 
-    schema = load(ROOT / "models/acceptance.schema.json")
-    Draft202012Validator.check_schema(schema)
-    validator = Draft202012Validator(schema, format_checker=FormatChecker())
-    if next(validator.iter_errors(manifest), None) is not None:
-        return [{"code": "RPT-ACCEPTANCE-SCHEMA-001", "message": "Invalid acceptance payload."}]
-    today = today or date.today()
-    errors = []
 
-    def reject(code, message):
-        errors.append({"code": "RPT-ACCEPTANCE-" + code, "message": message})
-
-    def indexed(items, key):
-        result = {}
-        for item in items:
-            if item[key] in result:
-                reject("REFERENCE-001", "Duplicate acceptance identifier.")
-            result[item[key]] = item
-        return result
-
-    subjects = indexed(manifest["subjects"], "id")
-    evidence = indexed(manifest["evidence"], "id")
-    answers = indexed(manifest["answers"], "questionId")
-    stages = indexed(manifest["stages"], "id")
+def _check_acceptance_dates_and_subjects(manifest, subjects, today, reject):
     created, updated, review = (date.fromisoformat(manifest[key])
                                 for key in ("created", "updated", "review_after"))
     if not created <= updated <= review or updated > today:
@@ -103,6 +86,10 @@ def validate_acceptance(manifest, *, today=None):
                                       ensure_ascii=True).encode("utf-8")).hexdigest()
         for key, value in subjects.items()
     }
+    return created, updated, review, subject_hashes
+
+
+def _check_acceptance_evidence(subjects, evidence, subject_hashes, reject):
     for item in evidence.values():
         target = subjects.get(item["subject_id"])
         if target is None or item["subject_sha256"] != subject_hashes.get(item["subject_id"]):
@@ -116,6 +103,48 @@ def validate_acceptance(manifest, *, today=None):
                       + str(target["source_revision"]) + "/")
             if not reference.startswith(prefix) or not safe_path(reference[len(prefix):]):
                 reject("EVIDENCE-001", "Source evidence requires the exact revision and safe path.")
+
+
+def _check_answer_dates(item, updated, review, reject):
+    observed = datetime.fromisoformat(item["observation"]["at"].replace("Z", "+00:00")).date()
+    valid = date.fromisoformat(item["limits"]["valid_through"])
+    if observed > updated or valid < observed or valid > review:
+        reject("DATE-001", "Observation or validity lies outside the declared interval.")
+    return valid
+
+
+def _check_answer_applicability(item, status, reject):
+    applicability = item["applicability"]
+    if status == "N/A":
+        if applicability["state"] != "NOT_APPLICABLE" or not applicability["activation_condition"]:
+            reject("APPLICABILITY-001", "N/A requires a reason and activation condition.")
+    elif applicability["state"] != "APPLICABLE":
+        reject("APPLICABILITY-001", "An applicable answer cannot declare N/A scope.")
+
+
+def _check_answer_status_and_actions(item, target, links, status, reject):
+    if status in {"PASS", "FAIL"}:
+        if item["observation"]["execution"] != "PERFORMED" or not links:
+            reject("EVIDENCE-001", "PASS/FAIL require a performed observation and evidence.")
+        if any(value is not None and value["verification"]["result"] != "MATCH" for value in links):
+            reject("EVIDENCE-001", "PASS/FAIL require declared matching evidence verification.")
+        if target is not None and target["source_revision"] is None and target["artifact_sha256"] is None:
+            reject("SUBJECT-001", "PASS/FAIL require an identified source or artifact.")
+    if status == "UNKNOWN" and not item["limits"]["missing_data"]:
+        reject("UNKNOWN-001", "UNKNOWN must identify the missing knowledge.")
+    if status in {"FAIL", "UNKNOWN"} and not (item["nextAction"]["ticket_ref"] or item["nextAction"]["proposal"]):
+        reject("ACTION-001", "FAIL/UNKNOWN require an owned ticket or bounded proposal.")
+
+
+def _check_acceptance_single_answer(item, target, links, updated, review, today, reject):
+    valid = _check_answer_dates(item, updated, review, reject)
+    status = item["status"]
+    _check_answer_applicability(item, status, reject)
+    _check_answer_status_and_actions(item, target, links, status, reject)
+    return status in {"PASS", "N/A"} and valid >= today and review >= today
+
+
+def _check_acceptance_answers(answers, subjects, evidence, updated, review, today, reject):
     acceptable = {}
     for key, item in answers.items():
         target = subjects.get(item["subject_id"])
@@ -124,30 +153,11 @@ def validate_acceptance(manifest, *, today=None):
         links = [evidence.get(value) for value in item["evidence_ids"]]
         if any(value is None or value["subject_id"] != item["subject_id"] for value in links):
             reject("REFERENCE-001", "Answer evidence is missing or belongs to another subject.")
-        observed = datetime.fromisoformat(item["observation"]["at"].replace("Z", "+00:00")).date()
-        valid = date.fromisoformat(item["limits"]["valid_through"])
-        if observed > updated or valid < observed or valid > review:
-            reject("DATE-001", "Observation or validity lies outside the declared interval.")
-        status = item["status"]
-        applicability = item["applicability"]
-        if status == "N/A":
-            if applicability["state"] != "NOT_APPLICABLE" or not applicability["activation_condition"]:
-                reject("APPLICABILITY-001", "N/A requires a reason and activation condition.")
-        elif applicability["state"] != "APPLICABLE":
-            reject("APPLICABILITY-001", "An applicable answer cannot declare N/A scope.")
-        if status in {"PASS", "FAIL"}:
-            if item["observation"]["execution"] != "PERFORMED" or not links:
-                reject("EVIDENCE-001", "PASS/FAIL require a performed observation and evidence.")
-            if any(value is not None and value["verification"]["result"] != "MATCH" for value in links):
-                reject("EVIDENCE-001", "PASS/FAIL require declared matching evidence verification.")
-            if target is not None and target["source_revision"] is None and target["artifact_sha256"] is None:
-                reject("SUBJECT-001", "PASS/FAIL require an identified source or artifact.")
-        if status == "UNKNOWN" and not item["limits"]["missing_data"]:
-            reject("UNKNOWN-001", "UNKNOWN must identify the missing knowledge.")
-        if status in {"FAIL", "UNKNOWN"} and not (item["nextAction"]["ticket_ref"] or item["nextAction"]["proposal"]):
-            reject("ACTION-001", "FAIL/UNKNOWN require an owned ticket or bounded proposal.")
-        acceptable[key] = status in {"PASS", "N/A"} and valid >= today and review >= today
+        acceptable[key] = _check_acceptance_single_answer(item, target, links, updated, review, today, reject)
+    return acceptable
 
+
+def _check_acceptance_stages(stages, answers, acceptable, reject):
     visiting, resolved = set(), {}
 
     def eligible(key):
@@ -176,20 +186,55 @@ def validate_acceptance(manifest, *, today=None):
         expected = "ELIGIBLE" if eligible(key) else "BLOCKED"
         if stage["eligibility"] != expected:
             reject("STAGE-001", "Declared eligibility differs from scoped assessment.")
-    return errors
 
 
-def validate(manifest, *, today=None):
-    if isinstance(manifest, dict) and manifest.get("schema") == "wellmanifest.report/acceptance/v1":
-        return validate_acceptance(manifest, today=today)
-    docs, validator = dependencies()
+def validate_acceptance(manifest, *, today=None):
+    """Check scoped acceptance claims, not external evidence or authority."""
+    schema = load(ROOT / "models/acceptance.schema.json")
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema, format_checker=FormatChecker())
     if next(validator.iter_errors(manifest), None) is not None:
-        return [{"code": "RPT-SCHEMA-001", "message": "Invalid closed manifest shape or unsupported version."}]
+        return [{"code": "RPT-ACCEPTANCE-SCHEMA-001", "message": "Invalid acceptance payload."}]
+    today = today or date.today()
     errors = []
 
     def reject(code, message):
-        errors.append({"code": code, "message": message})
+        errors.append({"code": "RPT-ACCEPTANCE-" + code, "message": message})
 
+    subjects = _indexed_acceptance(manifest["subjects"], "id", reject)
+    evidence = _indexed_acceptance(manifest["evidence"], "id", reject)
+    answers = _indexed_acceptance(manifest["answers"], "questionId", reject)
+    stages = _indexed_acceptance(manifest["stages"], "id", reject)
+
+    _created, updated, review, subject_hashes = _check_acceptance_dates_and_subjects(
+        manifest, subjects, today, reject
+    )
+    _check_acceptance_evidence(subjects, evidence, subject_hashes, reject)
+    acceptable = _check_acceptance_answers(answers, subjects, evidence, updated, review, today, reject)
+    _check_acceptance_stages(stages, answers, acceptable, reject)
+    return errors
+
+
+def _indexed_unique(items, label, reject):
+    result = {item["id"]: item for item in items}
+    if len(result) != len(items):
+        reject("RPT-REFERENCE-001", label + " identifiers must be unique.")
+    return result
+
+
+def _resolve_references(ids, evidence, *, kind=None, subject=None, reject=None):
+    selected = []
+    for identifier in ids:
+        item = evidence.get(identifier)
+        if item is None or (kind and item["kind"] != kind) or (subject and item["subject_id"] != subject):
+            if reject:
+                reject("RPT-REFERENCE-001", "Evidence reference is missing or has an incompatible binding.")
+        else:
+            selected.append(item)
+    return selected
+
+
+def _validate_placement(manifest, docs, reject):
     owner = manifest["owner"]
     repositories = manifest["scope"]["repositories"]
     profile = docs["profile"]
@@ -208,37 +253,26 @@ def validate(manifest, *, today=None):
     if any(document["path"].startswith(prefix) for prefix in docs["forbidden_delivery_roots"]):
         reject("RPT-PLACEMENT-001", "Operational storage is not a report delivery location.")
 
+
+def _validate_report_dates(manifest, today, reject):
     created, updated, review = (date.fromisoformat(manifest[k])
                                 for k in ("created", "updated", "review_after"))
     if created > updated or updated > review or updated > (today or date.today()):
         reject("RPT-DATE-001", "Report dates are inconsistent or future-dated.")
 
-    def indexed(items, label):
-        result = {item["id"]: item for item in items}
-        if len(result) != len(items):
-            reject("RPT-REFERENCE-001", label + " identifiers must be unique.")
-        return result
 
-    subjects = indexed(manifest["scope"]["subjects"], "Subject")
-    evidence = indexed(manifest["evidence"], "Evidence")
-    indexed(manifest["findings"], "Finding")
+def _validate_scope_subjects(manifest, owner, repositories, reject):
+    subjects = _indexed_unique(manifest["scope"]["subjects"], "Subject", reject)
     for subject in subjects.values():
         if subject["repository"] not in {*repositories, owner}:
             reject("RPT-REFERENCE-001", "Subject is outside the declared repositories.")
     analyzed = {s["repository"] for s in subjects.values()}
     if set(repositories) - analyzed:
         reject("RPT-REFERENCE-001", "Every scoped repository requires an exact-revision subject.")
+    return subjects
 
-    def references(ids, *, kind=None, subject=None):
-        selected = []
-        for identifier in ids:
-            item = evidence.get(identifier)
-            if item is None or (kind and item["kind"] != kind) or (subject and item["subject_id"] != subject):
-                reject("RPT-REFERENCE-001", "Evidence reference is missing or has an incompatible binding.")
-            else:
-                selected.append(item)
-        return selected
 
+def _validate_evidence_items(subjects, evidence, reject):
     for item in evidence.values():
         subject = subjects.get(item["subject_id"])
         if subject is None:
@@ -251,11 +285,16 @@ def validate(manifest, *, today=None):
                 reject("RPT-REFERENCE-001", "Source reference must bind the subject repository and immutable revision.")
         elif reference.rsplit(":", 1)[-1] != item["sha256"]:
             reject("RPT-REFERENCE-001", "Content-addressed reference and evidence digest differ.")
+
+
+def _validate_findings(manifest, evidence, references, reject):
     for finding in manifest["findings"]:
         references(finding["evidence_ids"])
         if finding["kind"] == "fact" and not finding["evidence_ids"]:
             reject("RPT-EVIDENCE-001", "Facts require evidence; unsupported statements remain hypotheses.")
 
+
+def _validate_coverage(manifest, reject):
     coverage = manifest["coverage"]
     if coverage["expected"] is not None and coverage["observed"] > coverage["expected"]:
         reject("RPT-COVERAGE-001", "Observed coverage exceeds the declared scope.")
@@ -264,6 +303,8 @@ def validate(manifest, *, today=None):
     if coverage["state"] != "complete" and not manifest["limitations"]:
         reject("RPT-COVERAGE-001", "Partial or unknown coverage requires explicit limitations.")
 
+
+def _validate_checks_assessment(manifest, subjects, evidence, coverage, references, reject):
     results = []
     for check in manifest["checks"]:
         results.append(check["result"])
@@ -278,6 +319,8 @@ def validate(manifest, *, today=None):
     if manifest["assessment"] != assessment:
         reject("RPT-ASSESSMENT-001", "Assessment disagrees with checks and scope coverage.")
 
+
+def _validate_redaction(manifest, evidence, references, reject):
     redaction = manifest["redaction"]
     references(redaction["evidence_ids"], kind="redaction")
     if redaction["state"] == "checked" and not redaction["evidence_ids"]:
@@ -285,6 +328,8 @@ def validate(manifest, *, today=None):
     if manifest["status"] == "final" and redaction["state"] != "checked":
         reject("RPT-EVIDENCE-001", "Final reports require a documented redaction check.")
 
+
+def _validate_publication(manifest, owner, document, subjects, evidence, references, reject):
     publication = manifest["publication"]
     proof = references(publication["evidence_ids"], kind="publication")
     if publication["state"] == "local":
@@ -299,54 +344,107 @@ def validate(manifest, *, today=None):
         if (subject.get("repository") != owner or subject.get("revision") != publication["revision"]
                 or item["sha256"] != document["sha256"]):
             reject("RPT-PUBLICATION-001", "Publication evidence must bind the report owner, revision and document digest.")
+
+
+def validate(manifest, *, today=None):
+    if isinstance(manifest, dict) and manifest.get("schema") == "wellmanifest.report/acceptance/v1":
+        return validate_acceptance(manifest, today=today)
+    docs, validator = dependencies()
+    if next(validator.iter_errors(manifest), None) is not None:
+        return [{"code": "RPT-SCHEMA-001", "message": "Invalid closed manifest shape or unsupported version."}]
+    errors = []
+
+    def reject(code, message):
+        errors.append({"code": code, "message": message})
+
+    owner = manifest["owner"]
+    repositories = manifest["scope"]["repositories"]
+    document = manifest["document"]
+
+    _validate_placement(manifest, docs, reject)
+    _validate_report_dates(manifest, today, reject)
+    subjects = _validate_scope_subjects(manifest, owner, repositories, reject)
+    evidence = _indexed_unique(manifest["evidence"], "Evidence", reject)
+    _indexed_unique(manifest["findings"], "Finding", reject)
+
+    def references(ids, *, kind=None, subject=None):
+        return _resolve_references(ids, evidence, kind=kind, subject=subject, reject=reject)
+
+    _validate_evidence_items(subjects, evidence, reject)
+    _validate_findings(manifest, evidence, references, reject)
+    _validate_coverage(manifest, reject)
+    _validate_checks_assessment(manifest, subjects, evidence, manifest["coverage"], references, reject)
+    _validate_redaction(manifest, evidence, references, reject)
+    _validate_publication(manifest, owner, document, subjects, evidence, references, reject)
     return errors
+
+
+def _check_git_repo_origin(root, owner, reject):
+    top = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], cwd=root, stderr=subprocess.DEVNULL, text=True).strip()
+    remote = subprocess.check_output(['git', 'remote', 'get-url', 'origin'], cwd=root, stderr=subprocess.DEVNULL, text=True).strip()
+    match = re.fullmatch(r'(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?', remote)
+    if Path(top).resolve() != root or not match or match.group(1) != owner:
+        reject('Root must be the owning Git repository, not a nested directory or another origin.')
+        return False
+    return True
+
+
+def _read_local_artifacts(root, files, document, expected_sidecar, reject):
+    contents = {}
+    for name in (document['path'], document['index_path'], expected_sidecar):
+        if not safe_path(name):
+            reject('Unsafe local artifact path.')
+            continue
+        path = root / name
+        current = root
+        for part in PurePosixPath(name).parts:
+            current /= part
+            if current.is_symlink():
+                reject('Local artifacts must not use symlinks.')
+                break
+        else:
+            if name not in files or not path.is_file():
+                reject('Document, sidecar and index must exist and be tracked in Git.')
+                continue
+            contents[name] = path.read_bytes()
+    return contents
+
+
+def _verify_local_digests_and_index(manifest, document, expected_sidecar, contents, reject):
+    sidecar_bytes = contents.get(expected_sidecar)
+    if sidecar_bytes is not None and decode(sidecar_bytes) != manifest:
+        reject('Actual sidecar changed since manifest validation.')
+    raw = contents.get(document['path'])
+    if raw is not None and hashlib.sha256(raw).hexdigest() != document['sha256']:
+        reject('Actual document digest differs from the manifest.')
+    index = contents.get(document['index_path'])
+    if index is not None:
+        link = PurePosixPath(document['path']).relative_to(PurePosixPath(document['index_path']).parent).as_posix()
+        if not re.search(r'\]\(' + re.escape(link) + r'(?:#[^)]*)?\)', index.decode('utf-8')):
+            reject('Canonical document is missing from the tracked index.')
 
 
 def validate_local(manifest, root, manifest_path):
     """Read back canonical local Git artifacts; never attest remote publication."""
     root = Path(root).resolve()
     errors = []
+
     def reject(message):
         errors.append({'code': 'RPT-LOCAL-001', 'message': message})
+
     if manifest.get('schema') != 'wellmanifest.report/manifest/v1':
         return [{'code': 'RPT-LOCAL-001', 'message': 'Local report checks require a report manifest, not acceptance alone.'}]
     try:
-        top = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], cwd=root, stderr=subprocess.DEVNULL, text=True).strip()
-        remote = subprocess.check_output(['git', 'remote', 'get-url', 'origin'], cwd=root, stderr=subprocess.DEVNULL, text=True).strip()
-        match = re.fullmatch(r'(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?', remote)
-        if Path(top).resolve() != root or not match or match.group(1) != manifest['owner']:
-            reject('Root must be the owning Git repository, not a nested directory or another origin.')
+        if not _check_git_repo_origin(root, manifest['owner'], reject):
+            return errors
         files = set(subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0'))
         document = manifest['document']
         expected_sidecar = str(PurePosixPath(document['path']).with_suffix('.report.json'))
         supplied = Path(manifest_path).absolute()
         if supplied != root / expected_sidecar:
             reject('Manifest must be the canonical sidecar beside the document.')
-        contents = {}
-        for name in (document['path'], document['index_path'], expected_sidecar):
-            if not safe_path(name):
-                reject('Unsafe local artifact path.'); continue
-            path = root / name
-            current = root
-            for part in PurePosixPath(name).parts:
-                current /= part
-                if current.is_symlink():
-                    reject('Local artifacts must not use symlinks.'); break
-            else:
-                if name not in files or not path.is_file():
-                    reject('Document, sidecar and index must exist and be tracked in Git.'); continue
-                contents[name] = path.read_bytes()
-        sidecar_bytes = contents.get(expected_sidecar)
-        if sidecar_bytes is not None and decode(sidecar_bytes) != manifest:
-            reject('Actual sidecar changed since manifest validation.')
-        raw = contents.get(document['path'])
-        if raw is not None and hashlib.sha256(raw).hexdigest() != document['sha256']:
-            reject('Actual document digest differs from the manifest.')
-        index = contents.get(document['index_path'])
-        if index is not None:
-            link = PurePosixPath(document['path']).relative_to(PurePosixPath(document['index_path']).parent).as_posix()
-            if not re.search(r'\]\(' + re.escape(link) + r'(?:#[^)]*)?\)', index.decode('utf-8')):
-                reject('Canonical document is missing from the tracked index.')
+        contents = _read_local_artifacts(root, files, document, expected_sidecar, reject)
+        _verify_local_digests_and_index(manifest, document, expected_sidecar, contents, reject)
     except (OSError, subprocess.CalledProcessError, ValueError, KeyError, UnicodeError):
         reject('Unable to read owning Git repository and canonical report artifacts.')
     return errors
