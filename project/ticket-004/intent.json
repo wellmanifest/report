@@ -1,0 +1,74 @@
+{
+  "schema": "new-project.intent/v3",
+  "ticket": "ticket-004",
+  "summary": "Decompose validate functions in conformance engine",
+  "workstream": "integration",
+  "classification": {
+    "kind": "SERVICE",
+    "priority": "P2",
+    "origin": "health"
+  },
+  "allowedPaths": [
+    "project/ticket-004/**",
+    "project/ticket-003/README.md",
+    "TODO.md",
+    "project/TICKETS.md",
+    "operations/**"
+  ],
+  "forbiddenPaths": [
+    "project/ticket-*/user-*.md"
+  ],
+  "stacks": [],
+  "dependsOn": [],
+  "conflictsWith": [],
+  "integrationTicket": null,
+  "delivery": {
+    "acceptedBaseSha": "788b68ae565af1f09804768e94ce0fe6cc8870ca",
+    "targetBranch": "main",
+    "outcome": "Decompose high-CC methods in report conformance engine (validate, validate_acceptance, validate_local <= 15).",
+    "nonGoals": [
+      "No schema or public contract modifications."
+    ],
+    "complexity": "S",
+    "estimatedMinutes": 30,
+    "budgets": {
+      "maxImplementationFiles": 5,
+      "maxAffectedComponents": 1,
+      "maxPublicInterfaceChanges": 0,
+      "maxRuntimeDependencies": 0
+    },
+    "architecture": {
+      "status": "accepted",
+      "decision": "Decompose monolithic validation functions in operations/conformance.py into focused helper functions to reduce cyclomatic complexity under 15.",
+      "components": [
+        {
+          "name": "report-conformance",
+          "paths": [
+            "operations/conformance.py"
+          ]
+        }
+      ],
+      "responsibilityChanges": false,
+      "interfaceChanges": [],
+      "dataChanges": [],
+      "ui": {
+        "impact": "none",
+        "states": [],
+        "evidence": []
+      },
+      "rollback": "Revert commit to restore previous monolithic functions."
+    },
+    "runtimeDependencies": [],
+    "validation": [
+      {
+        "criterion": "AC-01",
+        "commands": [
+          "pytest",
+          "radon cc operations/conformance.py -s",
+          "./project/governance-check.sh"
+        ],
+        "evidence": "project/ticket-004/README.md"
+      }
+    ]
+  }
+}
