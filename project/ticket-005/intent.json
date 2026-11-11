@@ -1,0 +1,79 @@
+{
+  "schema": "new-project.intent/v3",
+  "ticket": "ticket-005",
+  "summary": "Modularize report conformance and harden O_NOFOLLOW reads, UTC date normalization, and schema caching",
+  "workstream": "integration",
+  "classification": {
+    "kind": "BUG",
+    "priority": "P2",
+    "origin": "health"
+  },
+  "allowedPaths": [
+    "project/ticket-005/**",
+    "TODO.md",
+    "project/TICKETS.md",
+    "operations/acceptance_conformance.py",
+    "operations/conformance.py",
+    "operations/report_io.py",
+    "operations/test_report.py"
+  ],
+  "forbiddenPaths": [
+    "project/ticket-*/user-*.md"
+  ],
+  "stacks": [],
+  "dependsOn": [],
+  "conflictsWith": [],
+  "integrationTicket": null,
+  "delivery": {
+    "acceptedBaseSha": "340244d0d150c1467c134ce072378fbed26d5c4f",
+    "targetBranch": "main",
+    "outcome": "Decompose operations/conformance.py (485L) into <350L report_io.py, acceptance_conformance.py, and conformance.py; enforce O_NOFOLLOW regular-file and MAX_BYTES limits on all file reads, dir_fd traversal in validate_local, UTC date conversion, git timeouts, and schema validator caching.",
+    "nonGoals": [
+      "No wire-schema or diagnostic code breaking changes."
+    ],
+    "complexity": "S",
+    "estimatedMinutes": 25,
+    "budgets": {
+      "maxImplementationFiles": 4,
+      "maxAffectedComponents": 1,
+      "maxPublicInterfaceChanges": 0,
+      "maxRuntimeDependencies": 0
+    },
+    "architecture": {
+      "status": "accepted",
+      "decision": "Extract descriptor-safe bounded I/O into operations/report_io.py and scoped acceptance conformance into operations/acceptance_conformance.py while keeping report validation, local readback, CLI, and re-exports in operations/conformance.py (<350L each, CC <= 12).",
+      "components": [
+        {
+          "name": "report-conformance",
+          "paths": [
+            "operations/report_io.py",
+            "operations/acceptance_conformance.py",
+            "operations/conformance.py",
+            "operations/test_report.py"
+          ]
+        }
+      ],
+      "responsibilityChanges": false,
+      "interfaceChanges": [],
+      "dataChanges": [],
+      "ui": {
+        "impact": "none",
+        "states": [],
+        "evidence": []
+      },
+      "rollback": "Revert commit on operations/ to restore single-file conformance module."
+    },
+    "runtimeDependencies": [],
+    "validation": [
+      {
+        "criterion": "AC-01",
+        "commands": [
+          "PYTHONPATH=operations pytest -q operations/test_report.py",
+          "python3 -B operations/conformance.py --example",
+          "./project/governance-check.sh --base origin/main"
+        ],
+        "evidence": "project/ticket-005/README.md"
+      }
+    ]
+  }
+}

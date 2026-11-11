@@ -1,13 +1,13 @@
 """Synthetic conformance vectors; no remote effects or real credentials."""
 
 import copy
-import json
-import tempfile
-import subprocess
 import hashlib
-from pathlib import Path
-from datetime import date
+import json
+import subprocess
+import tempfile
 import unittest
+from datetime import date
+from pathlib import Path
 
 import conformance as c
 
@@ -49,13 +49,13 @@ class ReportTests(unittest.TestCase):
         return root, document, index, sidecar, git
 
     def test_local_readback_and_digest(self):
-        root, doc, index, sidecar, git = self.local_fixture()
+        root, doc, _index, sidecar, _git = self.local_fixture()
         self.assertEqual(c.validate_local(self.report, root, sidecar), [])
         doc.write_text('Different bytes')
         self.assertTrue(c.validate_local(self.report, root, sidecar))
 
     def test_local_rejects_sidecar_changed_after_load(self):
-        root, doc, index, sidecar, git = self.local_fixture()
+        root, _doc, _index, sidecar, _git = self.local_fixture()
         sidecar.write_text('{}')
         self.assertTrue(c.validate_local(self.report, root, sidecar))
 
@@ -68,7 +68,7 @@ class ReportTests(unittest.TestCase):
         self.assertTrue(c.validate_local(self.report, root, sidecar))
 
     def test_local_rejects_wrong_owner_symlink_and_recovery_sidecar(self):
-        root, doc, index, sidecar, git = self.local_fixture()
+        root, doc, _index, sidecar, git = self.local_fixture()
         self.assertTrue(c.validate_local(self.report, root, root / 'recovery.report.json'))
         git('remote', 'set-url', 'origin', 'https://github.com/another/repo.git')
         self.assertTrue(c.validate_local(self.report, root, sidecar))
@@ -77,6 +77,20 @@ class ReportTests(unittest.TestCase):
         git('remote', 'set-url', 'origin', 'https://github.com/wellmanifest/report.git')
         source = root / 'private.txt'; doc.rename(source); doc.symlink_to(source)
         self.assertTrue(c.validate_local(self.report, root, sidecar))
+        doc.unlink()
+        outside = root.parent / f"{root.name}-outside"
+        outside.mkdir(exist_ok=True)
+        try:
+            (outside / doc.name).write_text('# Escaped\n')
+            doc_dir = doc.parent
+            sidecar.unlink()
+            doc_dir.rmdir()
+            doc_dir.symlink_to(outside, target_is_directory=True)
+            self.assertTrue(c.validate_local(self.report, root, sidecar))
+        finally:
+            for child in outside.glob('*'):
+                child.unlink()
+            outside.rmdir()
 
     def test_example(self):
         self.assertEqual(self.errors(), set())
@@ -330,6 +344,38 @@ class AcceptanceTests(unittest.TestCase):
         self.payload["answers"].pop()
         self.payload["stages"][0]["requires"] = []
         self.assertTrue(self.errors())
+
+    def test_load_and_local_reject_symlinks_oversize_and_nondict_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real = root / "real.json"
+            real.write_text('{"ok": true}\n', encoding="utf-8")
+            sym = root / "sym.json"
+            sym.symlink_to(real)
+            with self.assertRaises(c.ContractError):
+                c.load(sym)
+            with self.assertRaises(c.ContractError):
+                c.load(root)
+
+            huge = root / "huge.json"
+            huge.write_bytes(b"x" * (c.MAX_BYTES + 10))
+            with self.assertRaises(c.ContractError):
+                c.load(huge)
+
+        self.assertEqual(
+            c.validate_local([], "/tmp", "/tmp/x.report.json")[0]["code"],
+            "RPT-LOCAL-001",
+        )
+        self.assertEqual(
+            c.validate_local(None, "/tmp", "/tmp/x.report.json")[0]["code"],
+            "RPT-LOCAL-001",
+        )
+
+    def test_all_operations_modules_stay_under_500_lines(self):
+        ops_dir = Path(c.__file__).resolve().parent
+        for py_path in sorted(ops_dir.glob("*.py")):
+            lines = len(py_path.read_text(encoding="utf-8").splitlines())
+            self.assertLess(lines, 500, f"{py_path.name} has {lines} lines (>= 500)")
 
 
 if __name__ == "__main__":
