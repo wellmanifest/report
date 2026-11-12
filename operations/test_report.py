@@ -377,6 +377,53 @@ class AcceptanceTests(unittest.TestCase):
             lines = len(py_path.read_text(encoding="utf-8").splitlines())
             self.assertLess(lines, 500, f"{py_path.name} has {lines} lines (>= 500)")
 
+    def test_ticket_006_parent_symlinks_float_overflow_surrogates_and_rfc3339(self):
+        # 1. Float overflow (1e309) and lone UTF-16 surrogates fail closed in decode()
+        for raw_bad in (b'{"n": 1e309}', b'{"n": -1e309}', b'{"s": "\\ud800"}', b'{"\\udfff": 1}'):
+            with self.subTest(raw_bad=raw_bad), self.assertRaises(c.ContractError):
+                c.decode(raw_bad)
+
+        # 2. Control characters, DEL, C1, surrogates, and whitespace segments fail safe_path()
+        for bad_rel in ("docs/a\x00b.md", "docs/a\nb.md", "docs/a\x7fb.md", "docs/a\x85b.md", "docs/ a.md", "docs/a\ud800.md"):
+            self.assertFalse(c.safe_path(bad_rel), repr(bad_rel))
+
+        # 3. Symlinked parent directory and sym_dir/.. traversal fail closed in load() and validate_local()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real_dir = root / "real_dir"
+            real_dir.mkdir()
+            real_doc = real_dir / "doc.json"
+            real_doc.write_text('{"ok": true}\n', encoding="utf-8")
+            sym_dir = root / "sym_dir"
+            sym_dir.symlink_to(real_dir)
+            with self.assertRaises(c.ContractError):
+                c.load(sym_dir / "doc.json")
+            with self.assertRaises(c.ContractError):
+                c.load(f"{sym_dir}/../real_dir/doc.json")
+
+        # 4. Acceptance schema rejects dot-segment repository names while allowing .github
+        acc = copy.deepcopy(self.payload)
+        acc["subjects"][0]["scope"]["repository"] = "maskservice/.github"
+        self.assertEqual([], c.validate(acc, today=date(2026, 9, 14)))
+        for bad_repo in ("maskservice/..", "maskservice/.", "./.", "../.."):
+            bad_acc = copy.deepcopy(self.payload)
+            bad_acc["subjects"][0]["scope"]["repository"] = bad_repo
+            self.assertEqual("RPT-ACCEPTANCE-SCHEMA-001", c.validate(bad_acc, today=date(2026, 9, 14))[0]["code"])
+            bad_owner = copy.deepcopy(self.payload)
+            bad_owner["answers"][0]["nextAction"]["owner"] = bad_repo
+            self.assertEqual("RPT-ACCEPTANCE-SCHEMA-001", c.validate(bad_owner, today=date(2026, 9, 14))[0]["code"])
+
+        # 5. Strict RFC3339 UTC timestamps (9-digit nanos accepted; underscore/>9 digits/compact ISO dates rejected)
+        acc_ns = copy.deepcopy(self.payload)
+        acc_ns["answers"][0]["observation"]["at"] = "2026-09-14T00:00:00.123456789Z"
+        self.assertEqual([], c.validate(acc_ns, today=date(2026, 9, 14)))
+        for bad_at in ("2026-09-14_00:00:00Z", "2026-09-14T00:00:00.1234567890Z", "\u0662\u0660\u0662\u0666-09-14T00:00:00Z"):
+            bad_obs = copy.deepcopy(self.payload)
+            bad_obs["answers"][0]["observation"]["at"] = bad_at
+            self.assertTrue(c.validate(bad_obs, today=date(2026, 9, 14)))
+        for bad_cal in ("20260914", "2026-W38-1", "\u0662\u0660\u0662\u0666-09-14"):
+            self.assertIsNone(c.parse_iso_date(bad_cal))
+
 
 if __name__ == "__main__":
     unittest.main()

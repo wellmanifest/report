@@ -78,7 +78,7 @@
             "properties": {
               "repository": {
                 "type": "string",
-                "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/(?!\\.{1,2}$)[A-Za-z0-9_.-]+$",
                 "maxLength": 160
               },
               "instance": {
@@ -209,7 +209,7 @@
           "reference": {
             "type": "string",
             "maxLength": 2048,
-            "pattern": "^(?:(?:artifact|receipt):sha256:[a-f0-9]{64}|repo://[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[a-f0-9]{40}/[^\\s?#]+)$"
+            "pattern": "^(?:(?:artifact|receipt):sha256:[a-f0-9]{64}|repo://[A-Za-z0-9][A-Za-z0-9_.-]*/(?!\\.{1,2}@)[A-Za-z0-9_.-]+@[a-f0-9]{40}/[^\\s?#]+)$"
           },
           "sha256": {
             "type": "string",
@@ -437,7 +437,7 @@
               },
               "owner": {
                 "type": "string",
-                "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/(?!\\.{1,2}$)[A-Za-z0-9_.-]+$",
                 "maxLength": 160
               },
               "ticket_ref": {
