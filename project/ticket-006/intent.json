@@ -1,0 +1,89 @@
+{
+  "schema": "new-project.intent/v3",
+  "ticket": "ticket-006",
+  "summary": "Harden symlink ancestors, float overflow, surrogates, RFC3339 dates, and acceptance repo patterns",
+  "workstream": "integration",
+  "classification": {
+    "kind": "BUG",
+    "priority": "P1",
+    "origin": "health"
+  },
+  "allowedPaths": [
+    "project/ticket-006/**",
+    "TODO.md",
+    "project/TICKETS.md",
+    "models/acceptance.schema.json",
+    "operations/acceptance_conformance.py",
+    "operations/conformance.py",
+    "operations/local_conformance.py",
+    "operations/report_io.py",
+    "operations/test_report.py"
+  ],
+  "forbiddenPaths": [
+    "project/ticket-*/user-*.md"
+  ],
+  "stacks": [],
+  "dependsOn": [],
+  "conflictsWith": [],
+  "integrationTicket": null,
+  "delivery": {
+    "acceptedBaseSha": "ce55bfe0f7b3ca96b14407e37d40e21d57d637cb",
+    "targetBranch": "main",
+    "outcome": "Harden symlink-ancestor and (st_dev, st_ino) regular-file checks, float overflow and UTF-16 surrogate rejection, C0/DEL/C1/whitespace safe_path checks, strict ASCII RFC3339 calendar/UTC timestamps, and dot-segment repository pattern parity across models/acceptance.schema.json and operations/.",
+    "nonGoals": [
+      "No wire-schema breaking changes for valid manifests or acceptance claims."
+    ],
+    "complexity": "M",
+    "estimatedMinutes": 30,
+    "budgets": {
+      "maxImplementationFiles": 6,
+      "maxAffectedComponents": 2,
+      "maxPublicInterfaceChanges": 0,
+      "maxRuntimeDependencies": 0
+    },
+    "architecture": {
+      "status": "accepted",
+      "decision": "Enforce lexical symlink-ancestor walks and (st_dev, st_ino) parity in report_io.py, extract local_conformance.py (< 500 lines), reject 1e309 float overflow and lone UTF-16 surrogates in decode(), share strict ASCII YYYY-MM-DD and RFC3339 UTC timestamp validation across acceptance_conformance.py and conformance.py, and align repository dot-segment rejection in acceptance.schema.json.",
+      "components": [
+        {
+          "name": "acceptance-schema",
+          "paths": [
+            "models/acceptance.schema.json"
+          ]
+        },
+        {
+          "name": "report-conformance",
+          "paths": [
+            "operations/report_io.py",
+            "operations/acceptance_conformance.py",
+            "operations/local_conformance.py",
+            "operations/conformance.py",
+            "operations/test_report.py"
+          ]
+        }
+      ],
+      "responsibilityChanges": false,
+      "interfaceChanges": [],
+      "dataChanges": [],
+      "ui": {
+        "impact": "none",
+        "states": [],
+        "evidence": []
+      },
+      "rollback": "Revert models/acceptance.schema.json and operations/*.py to acceptedBaseSha."
+    },
+    "runtimeDependencies": [],
+    "validation": [
+      {
+        "criterion": "AC-01",
+        "commands": [
+          "PYTHONPATH=operations pytest -q operations/test_report.py",
+          "python3 -B operations/conformance.py --example",
+          "./project/governance-check.sh --base origin/main",
+          "wellman check"
+        ],
+        "evidence": "project/ticket-006/README.md"
+      }
+    ]
+  }
+}
